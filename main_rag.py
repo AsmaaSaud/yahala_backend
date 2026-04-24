@@ -423,12 +423,17 @@ def chat_stream(user_message: str = Query(...), user_id: str = Query(...),
     except ValueError:
         raise HTTPException(400, "user_id must be a number")
 
+    # ✅ حل مشكلة Python closure — نحسب القيم قبل دخول stream()
+    user_profile_outer = fetch_user_profile(uid)
+    resolved_lat = user_lat if user_lat is not None else user_profile_outer.get("latitude")
+    resolved_lon = user_lon if user_lon is not None else user_profile_outer.get("longitude")
+
     def stream():
         try:
-            user_profile = fetch_user_profile(uid)
+            user_profile = user_profile_outer
             user_city    = user_profile.get("city")
-            user_lat     = user_lat if user_lat is not None else user_profile.get("latitude")
-            user_lon     = user_lon if user_lon is not None else user_profile.get("longitude")
+            user_lat     = resolved_lat
+            user_lon     = resolved_lon
 
             analysis  = analyze_message(user_message)
             intent    = analysis.get("intent", "General")
