@@ -3,6 +3,7 @@ YAHALA Assistant v7.0 — Personalized + Location-Aware
 """
 
 import json
+import math
 import os
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import StreamingResponse
@@ -106,6 +107,41 @@ Few-shot examples:
 - "¿Cuándo juega Arabia Saudita?" -> {{"language": "Spanish", "language_code": "es", "intent": "MatchSchedule", "entity": "Saudi Arabia"}}"""
 
 
+# ════════════════════════════════════════════
+# 0. حساب المسافة بين إحداثيين (كم)
+# ════════════════════════════════════════════
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """يحسب المسافة بالكيلومترات بين نقطتين جغرافيتين"""
+    R = 6371.0
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    Δφ = math.radians(lat2 - lat1)
+    Δλ = math.radians(lon2 - lon1)
+    a = math.sin(Δφ/2)**2 + math.cos(φ1)*math.cos(φ2)*math.sin(Δλ/2)**2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
+
+def sort_by_distance(services: list, user_lat: float, user_lon: float, limit: int = 3) -> list:
+    """يرتب الخدمات بالقرب من المستخدم ويضيف حقل distance_km"""
+    result = []
+    for s in services:
+        lat = s.get("latitude") or s.get("lat")
+        lon = s.get("longitude") or s.get("lon") or s.get("lng")
+        if lat is not None and lon is not None:
+            try:
+                dist = haversine_km(user_lat, user_lon, float(lat), float(lon))
+                s = dict(s)
+                s["distance_km"] = round(dist, 1)
+            except Exception:
+                s["distance_km"] = None
+        else:
+            s = dict(s)
+            s["distance_km"] = None
+        result.append(s)
+    # رتّب: الأقرب أولاً — من ليس له إحداثيات يذهب للآخر
+    result.sort(key=lambda x: x["distance_km"] if x["distance_km"] is not None else 9999)
+    return result[:limit]
+
+
 def analyze_message(message: str) -> dict:
     try:
         response = client.models.generate_content(
@@ -129,7 +165,7 @@ def fetch_user_profile(user_id: int) -> dict:
     """يجلب اسم المستخدم ومدينته وجنسيته من جدول users"""
     try:
         r = supabase.table("users") \
-            .select("user_id,name,city,nationality,gender,id_number,email") \
+            .select("user_id,name,city,nationality,gender,id_number,email,latitude,longitude") \
             .eq("user_id", user_id) \
             .maybeSingle() \
             .execute()
@@ -144,7 +180,8 @@ def fetch_user_profile(user_id: int) -> dict:
 # ════════════════════════════════════════════
 # 3. جلب البيانات من Supabase (مع فلترة المدينة)
 # ════════════════════════════════════════════
-def fetch_db_context(intent: str, entity: str | None, user_id: int, user_city: str | None = None) -> list:
+def fetch_db_context(intent: str, entity: str | None, user_id: int, user_city: str | None = None,
+                       user_lat: float | None = None, user_lon: float | None = None) -> list:
     try:
         if intent == "MyTickets":
             # جلب التذاكر مع تفاصيل الحدث
@@ -176,37 +213,45 @@ def fetch_db_context(intent: str, entity: str | None, user_id: int, user_city: s
             return unique
 
         elif intent == "Hotels":
-            # فلترة بمدينة المستخدم أولاً، وإلا جلب الأفضل تقييماً
+            # جلب الفنادق مع الإحداثيات لحساب المسافة
             query = supabase.table("services") \
-                .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,languages_supported") \
+                .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,languages_supported,latitude,longitude") \
                 .eq("service_category", "Hotel")
             if user_city:
                 query = query.ilike("city", f"%{user_city}%")
-            r = query.order("rating", desc=True).limit(8).execute()
+            r = query.order("rating", desc=True).limit(20).execute()
             results = r.data or []
-            # إذا لم تجد في مدينة المستخدم، جلب الكل
             if not results:
                 r = supabase.table("services") \
-                    .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,languages_supported") \
+                    .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,languages_supported,latitude,longitude") \
                     .eq("service_category", "Hotel") \
-                    .order("rating", desc=True).limit(8).execute()
+                    .order("rating", desc=True).limit(20).execute()
                 results = r.data or []
+            # ✅ رتّب بالمسافة إذا عندنا موقع المستخدم
+            if user_lat is not None and user_lon is not None and results:
+                results = sort_by_distance(results, user_lat, user_lon, limit=3)
+            else:
+                results = results[:3]
             return results
 
         elif intent == "Restaurants":
             query = supabase.table("services") \
-                .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,halal_certified") \
+                .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,halal_certified,latitude,longitude") \
                 .eq("service_category", "Restaurant")
             if user_city:
                 query = query.ilike("city", f"%{user_city}%")
-            r = query.order("rating", desc=True).limit(8).execute()
+            r = query.order("rating", desc=True).limit(20).execute()
             results = r.data or []
             if not results:
                 r = supabase.table("services") \
-                    .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,halal_certified") \
+                    .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,halal_certified,latitude,longitude") \
                     .eq("service_category", "Restaurant") \
-                    .order("rating", desc=True).limit(8).execute()
+                    .order("rating", desc=True).limit(20).execute()
                 results = r.data or []
+            if user_lat is not None and user_lon is not None and results:
+                results = sort_by_distance(results, user_lat, user_lon, limit=3)
+            else:
+                results = results[:3]
             return results
 
         elif intent == "FanZone":
@@ -290,7 +335,7 @@ def build_prompt(message: str, language: str, language_code: str,
             f"Context:\n{ctx}\n\n"
             f"---\nUser: {message}\n\n"
             f"Answer in {language} using the context above. "
-            f"If user city is available and results show nearby options, mention they are near the user's location."
+            f"If results include distance_km field, ALWAYS mention the distance (e.g. '1.2 km away' or 'على بُعد 1.2 كم'). Show top 3 nearest options with their distance."
         )
     else:
         return (
@@ -325,13 +370,16 @@ def root():
 
 
 @app.post("/chat")
-def chat(user_message: str = Query(...), user_id: str = Query(...)):
+def chat(user_message: str = Query(...), user_id: str = Query(...),
+         user_lat: float | None = Query(default=None), user_lon: float | None = Query(default=None)):
     if not user_message.strip():
         raise HTTPException(400, "Message is empty")
     try:
         uid = int(user_id)
         user_profile = fetch_user_profile(uid)
         user_city = user_profile.get("city")
+        user_lat  = user_lat if user_lat is not None else user_profile.get("latitude")
+        user_lon  = user_lon if user_lon is not None else user_profile.get("longitude")
 
         analysis = analyze_message(user_message)
         intent   = analysis.get("intent", "General")
@@ -340,7 +388,7 @@ def chat(user_message: str = Query(...), user_id: str = Query(...)):
         lang_code= analysis.get("language_code", "en")
 
         pdf = search_documents(user_message)
-        db  = fetch_db_context(intent, entity, uid, user_city)
+        db  = fetch_db_context(intent, entity, uid, user_city, user_lat, user_lon)
         print(f"📊 DB:{len(db)} PDF:{len(pdf)} City:{user_city}")
 
         prompt   = build_prompt(user_message, language, lang_code, pdf, db, user_profile)
@@ -368,7 +416,8 @@ def chat(user_message: str = Query(...), user_id: str = Query(...)):
 
 
 @app.post("/chat/stream")
-def chat_stream(user_message: str = Query(...), user_id: str = Query(...)):
+def chat_stream(user_message: str = Query(...), user_id: str = Query(...),
+               user_lat: float | None = Query(default=None), user_lon: float | None = Query(default=None)):
     try:
         uid = int(user_id)
     except ValueError:
@@ -378,6 +427,8 @@ def chat_stream(user_message: str = Query(...), user_id: str = Query(...)):
         try:
             user_profile = fetch_user_profile(uid)
             user_city    = user_profile.get("city")
+            user_lat     = user_lat if user_lat is not None else user_profile.get("latitude")
+            user_lon     = user_lon if user_lon is not None else user_profile.get("longitude")
 
             analysis  = analyze_message(user_message)
             intent    = analysis.get("intent", "General")
@@ -386,7 +437,7 @@ def chat_stream(user_message: str = Query(...), user_id: str = Query(...)):
             lang_code = analysis.get("language_code", "en")
 
             pdf = search_documents(user_message)
-            db  = fetch_db_context(intent, entity, uid, user_city)
+            db  = fetch_db_context(intent, entity, uid, user_city, user_lat, user_lon)
             print(f"📊 DB:{len(db)} PDF:{len(pdf)} City:{user_city} User:{user_profile.get('name','')}")
 
             prompt = build_prompt(user_message, language, lang_code, pdf, db, user_profile)
