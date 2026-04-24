@@ -1,11 +1,14 @@
 """
-YAHALA Assistant v7.0 — Personalized + Location-Aware
+YAHALA Assistant v8.0 — Smart, Location-Aware, DB-First
+- يجلب من DB أولاً بناءً على الإحداثيات الحقيقية (GPS)
+- يرتّب النتائج بالمسافة الفعلية (km)
+- يعود للـ PDF فقط إذا لم يجد في DB
+- يخاطب المستخدم باسمه في كل رد
 """
 
 import json
 import math
 import os
-import time
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from supabase import create_client, Client
@@ -25,8 +28,7 @@ if not all([SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY]):
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-CHAT_MODEL         = "gemini-2.5-flash"
-FALLBACK_MODEL     = "gemini-1.5-flash"
+CHAT_MODEL      = "gemini-2.5-flash"
 EMBEDDING_MODEL = "gemini-embedding-001"
 
 SAFETY = [
@@ -38,112 +40,87 @@ SAFETY = [
 
 INTENT_CONFIG = types.GenerateContentConfig(
     temperature=0.1,
-    max_output_tokens=1000,
+    max_output_tokens=500,
     safety_settings=SAFETY,
 )
 
+# ════════════════════════════════════════════════════════════════
+# SYSTEM PROMPT — شخصية المساعد
+# ════════════════════════════════════════════════════════════════
 SYSTEM_PROMPT = """You are 'YAHALA Assistant', the official smart assistant for the YAHALA app and FIFA World Cup 2034 in Saudi Arabia.
 
-CRITICAL LANGUAGE RULE:
-- ALWAYS detect the language of the user's message
-- ALWAYS respond in EXACTLY the same language the user wrote in
-- Arabic → Arabic | English → English | French → French | Any language → same language
+CRITICAL RULES — NEVER BREAK THESE:
+1. LANGUAGE: Always respond in EXACTLY the same language the user wrote in. Arabic→Arabic, English→English, etc.
+2. PERSONALIZATION: If user's name is provided, address them by first name warmly in EVERY response.
+   - Arabic: "أهلاً [Name]،" or "بالتأكيد [Name]،"
+   - English: "Hi [Name]!" or "Of course, [Name]!"
+3. DB-FIRST: Always present database results FIRST. Only use PDF documents as supplementary info.
+4. DISTANCE: When GPS coordinates are available and distances are provided, always mention them.
+   - Show top 5 closest options, mention distance in km.
+5. FORMAT: Use Markdown — bold for names, bullet points for lists, headers for sections.
+6. TICKETS: Show real ticket details from database. Include event name, date, seat info, status.
+7. HOTELS/RESTAURANTS: Show max 5 options sorted by distance (if GPS available) or rating.
+8. Be warm, helpful, and concise. Never say "I don't have information" if DB data is provided."""
 
-Response rules:
-- Be friendly, warm, and professional
-- Use Markdown for formatting (lists, bold, headers)
-- Use ONLY information from the provided context when available
-- If user data is provided, personalize the response (use their name, reference their city/location)
-- When showing hotels/restaurants/services, prioritize ones in or near the user's city
-- Keep responses concise and useful
-- For tickets, show real ticket details from the database
-
-You are an expert on FIFA World Cup 2034 Saudi Arabia: stadiums, hotels, restaurants, match schedules, tickets, and fan zones."""
-
-app = FastAPI(title="YAHALA RAG API v7.0")
-
-
-# ════════════════════════════════════════════
-# 1. كشف اللغة + النية
-# ════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════
+# INTENT CLASSIFIER
+# ════════════════════════════════════════════════════════════════
 DETECT_PROMPT = """You are an intent classifier. Return ONLY a JSON object, no markdown, no explanation.
 
-INTENT DEFINITIONS:
-- MyTickets: asks about tickets, bookings, reservations (my tickets, ticket help, تذاكري, مساعدة في التذاكر)
-- MatchSchedule: asks about games, matches, fixtures, teams playing, next game, مباراة, جدول المباريات, متى تلعب
-- Hotels: asks about hotels, accommodation, where to stay, lodging, فنادق, إقامة, حجز فندق, أين أنام, الفنادق القريبة
-- Restaurants: asks about food, restaurants, dining, eat, halal food, مطاعم, أكل, طعام, حلال
-- StadiumInfo: asks about stadiums, venues, where is the stadium, ملاعب, مواقع الملاعب, أين الملعب
-- FanZone: asks about fan zones, events, activities, entertainment, فان زون, فعاليات, ترفيه
-- Emergency: asks about emergency, police, hospital, ambulance, طوارئ, إسعاف, شرطة
-- UserProfile: asks about my profile, my info, my data, بياناتي, معلوماتي, ملفي
-- General: anything else about World Cup 2034
+INTENTS:
+- MyTickets: tickets, bookings, reservations (my tickets, تذاكري, تذكرتي)
+- MatchSchedule: matches, games, fixtures, schedule (مباراة, جدول, متى تلعب)
+- Hotels: hotels, accommodation, lodging, stay, where to sleep (فنادق, إقامة, أين أنام, الفنادق القريبة)
+- Restaurants: food, restaurants, dining, eat, halal (مطاعم, أكل, طعام, مطعم قريب)
+- StadiumInfo: stadiums, venues, arena (ملاعب, ملعب, أين الملعب, مكان المباراة)
+- FanZone: fan zones, events, entertainment, activities (فان زون, فعاليات, ترفيه, أنشطة)
+- Emergency: emergency, police, hospital, ambulance (طوارئ, إسعاف, شرطة, مستشفى)
+- UserProfile: my profile, my info, my data, who am I (بياناتي, معلوماتي, ملفي, من أنا)
+- General: anything else about World Cup 2034, Saudi Arabia, FIFA
 
 Message: "{message}"
 
-JSON format: {{"language": "English", "language_code": "en", "intent": "General", "entity": null}}
+JSON: {{"language": "English", "language_code": "en", "intent": "General", "entity": null}}
 
 Rules:
-- entity = team name if mentioned (e.g. "Saudi Arabia", "Brazil", "السعودية", "البرازيل"), else null
-- language and language_code must match the message language exactly
-- Return ONLY the JSON object, nothing else
+- entity = team name if mentioned (e.g. "Saudi Arabia", "Brazil", "السعودية"), else null
+- Return ONLY JSON, nothing else
 
-Few-shot examples:
+Examples:
 - "Nearby hotels" -> {{"language": "English", "language_code": "en", "intent": "Hotels", "entity": null}}
-- "next game for Saudi team" -> {{"language": "English", "language_code": "en", "intent": "MatchSchedule", "entity": "Saudi Arabia"}}
+- "My tickets" -> {{"language": "English", "language_code": "en", "intent": "MyTickets", "entity": null}}
 - "Stadium locations" -> {{"language": "English", "language_code": "en", "intent": "StadiumInfo", "entity": null}}
-- "Ticket help" -> {{"language": "English", "language_code": "en", "intent": "MyTickets", "entity": null}}
 - "Match schedule" -> {{"language": "English", "language_code": "en", "intent": "MatchSchedule", "entity": null}}
-- "Fan zones" -> {{"language": "English", "language_code": "en", "intent": "FanZone", "entity": null}}
-- "Emergency services" -> {{"language": "English", "language_code": "en", "intent": "Emergency", "entity": null}}
+- "next game Saudi Arabia" -> {{"language": "English", "language_code": "en", "intent": "MatchSchedule", "entity": "Saudi Arabia"}}
+- "Nearby restaurants" -> {{"language": "English", "language_code": "en", "intent": "Restaurants", "entity": null}}
 - "الفنادق القريبة" -> {{"language": "Arabic", "language_code": "ar", "intent": "Hotels", "entity": null}}
-- "فنادق" -> {{"language": "Arabic", "language_code": "ar", "intent": "Hotels", "entity": null}}
-- "أريد حجز فندق" -> {{"language": "Arabic", "language_code": "ar", "intent": "Hotels", "entity": null}}
-- "أين أقرب فندق" -> {{"language": "Arabic", "language_code": "ar", "intent": "Hotels", "entity": null}}
-- "متى مباراة السعودية" -> {{"language": "Arabic", "language_code": "ar", "intent": "MatchSchedule", "entity": "Saudi Arabia"}}
-- "مواقع الملاعب" -> {{"language": "Arabic", "language_code": "ar", "intent": "StadiumInfo", "entity": null}}
 - "تذاكري" -> {{"language": "Arabic", "language_code": "ar", "intent": "MyTickets", "entity": null}}
 - "مطاعم قريبة" -> {{"language": "Arabic", "language_code": "ar", "intent": "Restaurants", "entity": null}}
+- "مواقع الملاعب" -> {{"language": "Arabic", "language_code": "ar", "intent": "StadiumInfo", "entity": null}}
+- "متى مباراة السعودية" -> {{"language": "Arabic", "language_code": "ar", "intent": "MatchSchedule", "entity": "Saudi Arabia"}}
 - "فعاليات وترفيه" -> {{"language": "Arabic", "language_code": "ar", "intent": "FanZone", "entity": null}}
-- "Où sont les hôtels?" -> {{"language": "French", "language_code": "fr", "intent": "Hotels", "entity": null}}
-- "¿Cuándo juega Arabia Saudita?" -> {{"language": "Spanish", "language_code": "es", "intent": "MatchSchedule", "entity": "Saudi Arabia"}}"""
+- "Où sont les hôtels?" -> {{"language": "French", "language_code": "fr", "intent": "Hotels", "entity": null}}"""
 
 
-# ════════════════════════════════════════════
-# 0. حساب المسافة بين إحداثيين (كم)
-# ════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════
+# HELPER: حساب المسافة بين نقطتين (Haversine)
+# ════════════════════════════════════════════════════════════════
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """يحسب المسافة بالكيلومترات بين نقطتين جغرافيتين"""
+    """يحسب المسافة بالكيلومترات بين إحداثيتين"""
     R = 6371.0
-    φ1, φ2 = math.radians(lat1), math.radians(lat2)
-    Δφ = math.radians(lat2 - lat1)
-    Δλ = math.radians(lon2 - lon1)
-    a = math.sin(Δφ/2)**2 + math.cos(φ1)*math.cos(φ2)*math.sin(Δλ/2)**2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlam/2)**2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def sort_by_distance(services: list, user_lat: float, user_lon: float, limit: int = 3) -> list:
-    """يرتب الخدمات بالقرب من المستخدم ويضيف حقل distance_km"""
-    result = []
-    for s in services:
-        lat = s.get("latitude") or s.get("lat")
-        lon = s.get("longitude") or s.get("lon") or s.get("lng")
-        if lat is not None and lon is not None:
-            try:
-                dist = haversine_km(user_lat, user_lon, float(lat), float(lon))
-                s = dict(s)
-                s["distance_km"] = round(dist, 1)
-            except Exception:
-                s["distance_km"] = None
-        else:
-            s = dict(s)
-            s["distance_km"] = None
-        result.append(s)
-    # رتّب: الأقرب أولاً — من ليس له إحداثيات يذهب للآخر
-    result.sort(key=lambda x: x["distance_km"] if x["distance_km"] is not None else 9999)
-    return result[:limit]
+app = FastAPI(title="YAHALA RAG API v8.0")
 
 
+# ════════════════════════════════════════════════════════════════
+# 1. تحليل النية واللغة
+# ════════════════════════════════════════════════════════════════
 def analyze_message(message: str) -> dict:
     try:
         response = client.models.generate_content(
@@ -156,140 +133,215 @@ def analyze_message(message: str) -> dict:
         print(f"✅ Intent: {result}")
         return result
     except Exception as e:
-        print(f"⚠️ Detect error: {e}")
+        print(f"⚠️ Intent error: {e}")
         return {"language": "English", "language_code": "en", "intent": "General", "entity": None}
 
 
-# ════════════════════════════════════════════
-# 2. جلب بيانات المستخدم (الاسم + المدينة)
-# ════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════
+# 2. جلب بيانات المستخدم
+# ════════════════════════════════════════════════════════════════
 def fetch_user_profile(user_id: int) -> dict:
-    """يجلب اسم المستخدم ومدينته وجنسيته من جدول users"""
     try:
         r = supabase.table("users") \
-            .select("user_id,name,city,nationality,gender,id_number,email,latitude,longitude") \
+            .select("user_id,name,city,nationality,gender,latitude,longitude") \
             .eq("user_id", user_id) \
             .maybeSingle() \
             .execute()
         data = r.data or {}
-        print(f"✅ fetch_user_profile({user_id}) → {data.get('name','NOT FOUND')}")
+        print(f"✅ User: {data.get('name','?')} | city={data.get('city','?')} | lat={data.get('latitude')} | lon={data.get('longitude')}")
         return data
     except Exception as e:
-        print(f"⚠️ User profile error for id={user_id}: {e}")
+        print(f"⚠️ User profile error: {e}")
         return {}
 
 
-# ════════════════════════════════════════════
-# 3. جلب البيانات من Supabase (مع فلترة المدينة)
-# ════════════════════════════════════════════
-def fetch_db_context(intent: str, entity: str | None, user_id: int, user_city: str | None = None,
-                       user_lat: float | None = None, user_lon: float | None = None) -> list:
+# ════════════════════════════════════════════════════════════════
+# 3. جلب البيانات من DB مع دعم GPS الحقيقي
+# ════════════════════════════════════════════════════════════════
+def fetch_db_context(
+    intent: str,
+    entity: str | None,
+    user_id: int,
+    user_city: str | None = None,
+    user_lat: float | None = None,
+    user_lon: float | None = None,
+) -> list:
+    """
+    يجلب البيانات من Supabase حسب النية.
+    - إذا توفرت GPS → يرتّب بالمسافة الفعلية ويعيد أقرب 5
+    - إذا لم تتوفر GPS → يفلتر بالمدينة أو يعيد الأعلى تقييماً
+    """
+    has_gps = (user_lat is not None and user_lon is not None)
+
     try:
+        # ────────────────────────────────────────────
         if intent == "MyTickets":
-            # جلب التذاكر مع تفاصيل الحدث
             r = supabase.table("tickets") \
-                .select("ticket_id,ticket_state,seat_gate,seat_block,seat_row,seat_number,events(event_name,city,venue_name,start_datetime,event_status)") \
+                .select("ticket_id,ticket_state,seat_gate,seat_block,seat_row,seat_number,events(event_name,city,venue_name,start_datetime,end_datetime,event_status)") \
                 .eq("user_id", user_id) \
                 .execute()
             return r.data or []
 
+        # ────────────────────────────────────────────
         elif intent == "MatchSchedule":
             if entity:
                 r = supabase.table("events") \
                     .select("event_id,event_name,city,start_datetime,end_datetime,venue_name,event_status") \
                     .ilike("event_name", f"%{entity}%") \
-                    .order("start_datetime").execute()
+                    .order("start_datetime").limit(10).execute()
             else:
                 r = supabase.table("events") \
-                    .select("event_id,event_name,city,start_datetime,venue_name,event_status") \
+                    .select("event_id,event_name,city,start_datetime,end_datetime,venue_name,event_status") \
                     .order("start_datetime").limit(10).execute()
             return r.data or []
 
+        # ────────────────────────────────────────────
         elif intent == "StadiumInfo":
-            r = supabase.table("events").select("venue_name,city").execute()
+            r = supabase.table("events") \
+                .select("venue_name,city,latitude,longitude") \
+                .execute()
             seen, unique = set(), []
             for row in (r.data or []):
-                if row["venue_name"] not in seen:
+                if row.get("venue_name") not in seen:
                     seen.add(row["venue_name"])
+                    # أضف المسافة إذا GPS متوفر
+                    if has_gps and row.get("latitude") and row.get("longitude"):
+                        row["distance_km"] = round(haversine_km(
+                            user_lat, user_lon,
+                            float(row["latitude"]), float(row["longitude"])
+                        ), 1)
                     unique.append(row)
-            return unique
+            if has_gps:
+                unique.sort(key=lambda x: x.get("distance_km", 9999))
+            return unique[:5]
 
+        # ────────────────────────────────────────────
         elif intent == "Hotels":
-            # جلب الفنادق مع الإحداثيات لحساب المسافة
-            query = supabase.table("services") \
-                .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,languages_supported,latitude,longitude") \
-                .eq("service_category", "Hotel")
-            if user_city:
-                query = query.ilike("city", f"%{user_city}%")
-            r = query.order("rating", desc=True).limit(20).execute()
-            results = r.data or []
-            if not results:
-                r = supabase.table("services") \
-                    .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,languages_supported,latitude,longitude") \
-                    .eq("service_category", "Hotel") \
-                    .order("rating", desc=True).limit(20).execute()
-                results = r.data or []
-            # ✅ رتّب بالمسافة إذا عندنا موقع المستخدم
-            if user_lat is not None and user_lon is not None and results:
-                results = sort_by_distance(results, user_lat, user_lon, limit=3)
-            else:
-                results = results[:3]
-            return results
+            return _fetch_services_sorted(
+                category="Hotel",
+                select_cols="service_id,service_name,description,location,city,latitude,longitude,rating,price_range,contact_info,opening_hours",
+                user_city=user_city,
+                user_lat=user_lat,
+                user_lon=user_lon,
+                limit=5,
+            )
 
+        # ────────────────────────────────────────────
         elif intent == "Restaurants":
-            query = supabase.table("services") \
-                .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,halal_certified,latitude,longitude") \
-                .eq("service_category", "Restaurant")
-            if user_city:
-                query = query.ilike("city", f"%{user_city}%")
-            r = query.order("rating", desc=True).limit(20).execute()
-            results = r.data or []
-            if not results:
-                r = supabase.table("services") \
-                    .select("service_name,description,location,city,rating,price_range,contact_info,opening_hours,halal_certified,latitude,longitude") \
-                    .eq("service_category", "Restaurant") \
-                    .order("rating", desc=True).limit(20).execute()
-                results = r.data or []
-            if user_lat is not None and user_lon is not None and results:
-                results = sort_by_distance(results, user_lat, user_lon, limit=3)
-            else:
-                results = results[:3]
-            return results
+            return _fetch_services_sorted(
+                category="Restaurant",
+                select_cols="service_id,service_name,description,location,city,latitude,longitude,rating,price_range,contact_info,opening_hours,halal_certified",
+                user_city=user_city,
+                user_lat=user_lat,
+                user_lon=user_lon,
+                limit=5,
+            )
 
+        # ────────────────────────────────────────────
         elif intent == "FanZone":
-            query = supabase.table("services") \
-                .select("service_name,description,location,city,opening_hours,contact_info,tags") \
-                .eq("service_category", "Event")
-            if user_city:
-                query = query.ilike("city", f"%{user_city}%")
-            r = query.order("rating", desc=True).limit(8).execute()
-            results = r.data or []
-            if not results:
-                r = supabase.table("services") \
-                    .select("service_name,description,location,city,opening_hours,contact_info,tags") \
-                    .eq("service_category", "Event") \
-                    .order("rating", desc=True).limit(8).execute()
-                results = r.data or []
-            return results
+            return _fetch_services_sorted(
+                category="Event",
+                select_cols="service_id,service_name,description,location,city,latitude,longitude,opening_hours,contact_info",
+                user_city=user_city,
+                user_lat=user_lat,
+                user_lon=user_lon,
+                limit=5,
+            )
 
+        # ────────────────────────────────────────────
         elif intent == "Emergency":
-            return [{"info": "Emergency: 911 | Police: 999 | Ambulance: 997 | Civil Defense: 998"}]
+            return [{
+                "info": "Emergency Numbers in Saudi Arabia",
+                "emergency": "911",
+                "police": "999",
+                "ambulance": "997",
+                "civil_defense": "998",
+                "tourist_police": "920000814"
+            }]
 
+        # ────────────────────────────────────────────
         elif intent == "UserProfile":
             r = supabase.table("users") \
-                .select("name,city,nationality,gender,birthDate") \
+                .select("name,city,nationality,gender,birthDate,email,phone") \
                 .eq("user_id", user_id).maybeSingle().execute()
             return [r.data] if r.data else []
 
     except Exception as e:
-        print(f"⚠️ DB error: {e}")
+        print(f"⚠️ DB error (intent={intent}): {e}")
     return []
 
 
-# ════════════════════════════════════════════
-# 4. RAG — بحث في PDF
-# ════════════════════════════════════════════
-def search_documents(query: str, top_k: int = 4) -> list[dict]:
+def _fetch_services_sorted(
+    category: str,
+    select_cols: str,
+    user_city: str | None,
+    user_lat: float | None,
+    user_lon: float | None,
+    limit: int = 5,
+) -> list:
+    """
+    يجلب الخدمات ويرتّبها:
+    1. إذا GPS متوفر → يجلب الكل ويحسب المسافة ويعيد أقرب 5
+    2. إذا مدينة فقط → يفلتر بالمدينة
+    3. إذا لا شيء → يعيد الأعلى تقييماً
+    """
+    has_gps = (user_lat is not None and user_lon is not None)
+
+    try:
+        if has_gps:
+            # جلب كل السجلات مع إحداثياتها لحساب المسافة
+            r = supabase.table("services") \
+                .select(select_cols) \
+                .eq("service_category", category) \
+                .execute()
+            results = r.data or []
+
+            # احسب المسافة لكل سجل
+            for row in results:
+                lat = row.get("latitude")
+                lon = row.get("longitude")
+                if lat and lon:
+                    try:
+                        row["distance_km"] = round(haversine_km(
+                            user_lat, user_lon,
+                            float(lat), float(lon)
+                        ), 1)
+                    except:
+                        row["distance_km"] = 9999
+                else:
+                    row["distance_km"] = 9999
+
+            # رتّب بالمسافة وعيد أقرب 5
+            results.sort(key=lambda x: x.get("distance_km", 9999))
+            return results[:limit]
+
+        elif user_city:
+            # بدون GPS — فلتر بالمدينة
+            r = supabase.table("services") \
+                .select(select_cols) \
+                .eq("service_category", category) \
+                .ilike("city", f"%{user_city}%") \
+                .order("rating", desc=True).limit(limit).execute()
+            results = r.data or []
+            if results:
+                return results
+
+        # fallback: الأعلى تقييماً بغض النظر عن المدينة
+        r = supabase.table("services") \
+            .select(select_cols) \
+            .eq("service_category", category) \
+            .order("rating", desc=True).limit(limit).execute()
+        return r.data or []
+
+    except Exception as e:
+        print(f"⚠️ _fetch_services_sorted error: {e}")
+        return []
+
+
+# ════════════════════════════════════════════════════════════════
+# 4. RAG — بحث في PDF (يُستخدم كـ fallback فقط)
+# ════════════════════════════════════════════════════════════════
+def search_documents(query: str, top_k: int = 3) -> list[dict]:
     try:
         emb = client.models.embed_content(
             model=EMBEDDING_MODEL,
@@ -300,7 +352,7 @@ def search_documents(query: str, top_k: int = 4) -> list[dict]:
         r = supabase.rpc("match_documents", {
             "query_embedding": embedding,
             "match_count": top_k,
-            "match_threshold": 0.5
+            "match_threshold": 0.55
         }).execute()
         return r.data or []
     except Exception as e:
@@ -308,183 +360,226 @@ def search_documents(query: str, top_k: int = 4) -> list[dict]:
         return []
 
 
-# ════════════════════════════════════════════
-# 5. بناء الـ Prompt
-# ════════════════════════════════════════════
-def build_prompt(message: str, language: str, language_code: str,
-                 pdf_results: list, db_results: list,
-                 user_profile: dict) -> str:
+# ════════════════════════════════════════════════════════════════
+# 5. بناء الـ Prompt الذكي
+# ════════════════════════════════════════════════════════════════
+def build_prompt(
+    message: str,
+    language: str,
+    db_results: list,
+    pdf_results: list,
+    user_profile: dict,
+    has_gps: bool,
+    intent: str,
+) -> str:
 
-    lang_rule = f"MANDATORY: User wrote in {language}. Respond in {language} ONLY."
+    lang_rule = f"MANDATORY: Respond in {language} ONLY."
     parts = []
 
-    # معلومات المستخدم
+    # ── معلومات المستخدم ──
     if user_profile:
-        user_ctx = f"👤 User Info: Name={user_profile.get('name','')}, City={user_profile.get('city','')}, Nationality={user_profile.get('nationality','')}"
-        parts.append(user_ctx)
+        name = user_profile.get('name', '')
+        city = user_profile.get('city', '')
+        nationality = user_profile.get('nationality', '')
+        user_info = f"👤 User: Name={name}"
+        if city: user_info += f", City={city}"
+        if nationality: user_info += f", Nationality={nationality}"
+        if has_gps: user_info += " | GPS Location: ✅ Available (distances calculated)"
+        else: user_info += " | GPS Location: ❌ Not available (using city)"
+        parts.append(user_info)
 
-    if pdf_results:
-        parts.append("📄 Official Documents:\n" + "\n\n".join(
-            f"[{r['source']}]\n{r['content']}" for r in pdf_results))
-
+    # ── بيانات DB (الأولوية) ──
     if db_results:
-        parts.append("🗄️ Database:\n" + json.dumps(db_results, ensure_ascii=False, indent=2))
+        db_label = "🗄️ DATABASE RESULTS (PRIMARY SOURCE — use these first):"
+        parts.append(db_label + "\n" + json.dumps(db_results, ensure_ascii=False, indent=2))
 
-    if parts:
-        ctx = "\n\n---\n\n".join(parts)
-        return (
-            f"{lang_rule}\n\n"
-            f"Context:\n{ctx}\n\n"
-            f"---\nUser: {message}\n\n"
-            f"Answer in {language} using the context above. "
-            f"If results include distance_km field, ALWAYS mention the distance (e.g. '1.2 km away' or 'على بُعد 1.2 كم'). Show top 3 nearest options with their distance."
-        )
-    else:
-        return (
-            f"{lang_rule}\n\n"
-            f"User: {message}\n\n"
-            f"Answer in {language} about FIFA World Cup 2034 Saudi Arabia."
-        )
+    # ── PDF كـ fallback ──
+    if pdf_results and not db_results:
+        parts.append("📄 Official Documents (fallback — DB had no results):\n" +
+                     "\n\n".join(f"[{r.get('source','doc')}]\n{r['content']}" for r in pdf_results))
+    elif pdf_results:
+        # إضافة PDF كمعلومات تكميلية فقط إذا كانت DB موجودة
+        parts.append("📄 Additional Context:\n" +
+                     "\n\n".join(f"[{r.get('source','doc')}]\n{r['content']}" for r in pdf_results[:1]))
+
+    ctx = "\n\n---\n\n".join(parts)
+
+    # ── تعليمات خاصة بكل intent ──
+    intent_instructions = {
+        "Hotels": (
+            "Show hotels as a numbered list. For each: **Name** | ⭐ rating | 📍 city | "
+            "distance_km if available | price_range. Show top 5 only."
+        ),
+        "Restaurants": (
+            "Show restaurants as a numbered list. For each: **Name** | ⭐ rating | 📍 city | "
+            "distance_km if available | halal status. Show top 5 only."
+        ),
+        "MyTickets": (
+            "Show each ticket with: Event name, Date/Time, Venue, City, Seat (Gate/Block/Row/Number), Status. "
+            "If no tickets found in DB, say so clearly."
+        ),
+        "StadiumInfo": (
+            "Show stadiums with their city and distance if available. "
+            "Mention which stadiums host which type of events."
+        ),
+        "MatchSchedule": (
+            "Show matches sorted by date. Include: Match name, Date, Time, Venue, City, Status."
+        ),
+    }
+    extra = intent_instructions.get(intent, "")
+
+    return (
+        f"{lang_rule}\n\n"
+        f"Context:\n{ctx}\n\n"
+        f"---\nUser message: {message}\n\n"
+        f"{extra}\n\n"
+        f"Important: Address the user by their first name. "
+        f"{'Mention distances in km for nearby results.' if has_gps else 'GPS not available, use city-based filtering.'} "
+        f"Use DB results as the primary source. Fall back to documents only if DB is empty."
+    )
 
 
-# ════════════════════════════════════════════
-# 6. Endpoint: معلومات الترحيب (الاسم)
-# ════════════════════════════════════════════
-@app.get("/user/greeting")
-def get_user_greeting(user_id: int = Query(...)):
-    """يرجع اسم المستخدم للرسالة الترحيبية"""
-    try:
-        profile = fetch_user_profile(user_id)
-        return {
-            "name": profile.get("name", ""),
-            "city": profile.get("city", ""),
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# ════════════════════════════════════════════
-# 7. Endpoints الرئيسية
-# ════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════
+# 6. Endpoints
+# ════════════════════════════════════════════════════════════════
 @app.get("/")
 def root():
-    return {"status": "✅ YAHALA RAG API v7.0", "sdk": "google.genai"}
+    return {"status": "✅ YAHALA RAG API v8.0", "features": ["GPS-sorting", "DB-first", "Personalized"]}
+
+
+@app.post("/chat/stream")
+def chat_stream(
+    user_message: str = Query(...),
+    user_id: str = Query(...),
+    user_lat: float | None = Query(default=None),
+    user_lon: float | None = Query(default=None),
+):
+    try:
+        uid = int(user_id)
+    except ValueError:
+        raise HTTPException(400, "user_id must be a number")
+
+    def stream():
+        try:
+            # 1. بيانات المستخدم
+            user_profile = fetch_user_profile(uid)
+            user_city = user_profile.get("city")
+
+            # 2. استخدم GPS من Flutter إذا أُرسل، وإلا استخدم ما في DB
+            lat = user_lat
+            lon = user_lon
+            if lat is None and user_profile.get("latitude"):
+                try:
+                    lat = float(user_profile["latitude"])
+                    lon = float(user_profile["longitude"])
+                    print(f"📍 Using GPS from DB: {lat}, {lon}")
+                except:
+                    pass
+            elif lat is not None:
+                print(f"📍 Using GPS from Flutter: {lat}, {lon}")
+
+            has_gps = (lat is not None and lon is not None)
+
+            # 3. تحليل النية
+            analysis = analyze_message(user_message)
+            intent    = analysis.get("intent", "General")
+            entity    = analysis.get("entity")
+            language  = analysis.get("language", "English")
+
+            # 4. جلب DB أولاً
+            db = fetch_db_context(intent, entity, uid, user_city, lat, lon)
+            print(f"📊 DB results: {len(db)} | intent={intent} | GPS={has_gps} | city={user_city}")
+
+            # 5. PDF كـ fallback (فقط للـ General أو إذا DB فارغة)
+            pdf = []
+            if intent == "General" or not db:
+                pdf = search_documents(user_message)
+                print(f"📄 PDF results: {len(pdf)}")
+
+            # 6. بناء الـ prompt
+            prompt = build_prompt(
+                message=user_message,
+                language=language,
+                db_results=db,
+                pdf_results=pdf,
+                user_profile=user_profile,
+                has_gps=has_gps,
+                intent=intent,
+            )
+
+            # 7. توليد الرد
+            for chunk in client.models.generate_content_stream(
+                model=CHAT_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    temperature=0.7,
+                    max_output_tokens=1000,
+                    safety_settings=SAFETY,
+                )
+            ):
+                try:
+                    if chunk.text:
+                        yield chunk.text
+                except Exception:
+                    continue
+
+        except Exception as e:
+            print(f"❌ Stream error: {e}")
+            yield f"\n\n❌ Error: {e}"
+
+    return StreamingResponse(stream(), media_type="text/plain; charset=utf-8")
 
 
 @app.post("/chat")
-def chat(user_message: str = Query(...), user_id: str = Query(...),
-         user_lat: float | None = Query(default=None), user_lon: float | None = Query(default=None)):
+def chat(
+    user_message: str = Query(...),
+    user_id: str = Query(...),
+    user_lat: float | None = Query(default=None),
+    user_lon: float | None = Query(default=None),
+):
+    """Non-streaming version"""
     if not user_message.strip():
         raise HTTPException(400, "Message is empty")
     try:
         uid = int(user_id)
         user_profile = fetch_user_profile(uid)
         user_city = user_profile.get("city")
-        user_lat  = user_lat if user_lat is not None else user_profile.get("latitude")
-        user_lon  = user_lon if user_lon is not None else user_profile.get("longitude")
+
+        lat = user_lat or (float(user_profile["latitude"]) if user_profile.get("latitude") else None)
+        lon = user_lon or (float(user_profile["longitude"]) if user_profile.get("longitude") else None)
+        has_gps = lat is not None and lon is not None
 
         analysis = analyze_message(user_message)
         intent   = analysis.get("intent", "General")
         entity   = analysis.get("entity")
         language = analysis.get("language", "English")
-        lang_code= analysis.get("language_code", "en")
 
-        pdf = search_documents(user_message)
-        db  = fetch_db_context(intent, entity, uid, user_city, user_lat, user_lon)
-        print(f"📊 DB:{len(db)} PDF:{len(pdf)} City:{user_city}")
+        db  = fetch_db_context(intent, entity, uid, user_city, lat, lon)
+        pdf = search_documents(user_message) if (intent == "General" or not db) else []
 
-        prompt   = build_prompt(user_message, language, lang_code, pdf, db, user_profile)
+        prompt = build_prompt(user_message, language, db, pdf, user_profile, has_gps, intent)
         response = client.models.generate_content(
             model=CHAT_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=0.7,
-                max_output_tokens=800,
+                max_output_tokens=1000,
                 safety_settings=SAFETY,
             )
         )
-
-        try:
-            reply = response.text
-        except Exception:
-            reply = "Sorry, could not generate a response. Please try again."
-
-        return {"reply": reply, "language": language, "intent": intent}
+        return {"reply": response.text, "language": language, "intent": intent, "db_count": len(db)}
 
     except Exception as e:
         print(f"❌ Error: {e}")
         raise HTTPException(500, str(e))
 
 
-@app.post("/chat/stream")
-def chat_stream(user_message: str = Query(...), user_id: str = Query(...),
-               user_lat: float | None = Query(default=None), user_lon: float | None = Query(default=None)):
-    try:
-        uid = int(user_id)
-    except ValueError:
-        raise HTTPException(400, "user_id must be a number")
-
-    # ✅ حل مشكلة Python closure — نحسب القيم قبل دخول stream()
-    user_profile_outer = fetch_user_profile(uid)
-    resolved_lat = user_lat if user_lat is not None else user_profile_outer.get("latitude")
-    resolved_lon = user_lon if user_lon is not None else user_profile_outer.get("longitude")
-
-    def stream():
-        try:
-            user_profile = user_profile_outer
-            user_city    = user_profile.get("city")
-            user_lat     = resolved_lat
-            user_lon     = resolved_lon
-
-            analysis  = analyze_message(user_message)
-            intent    = analysis.get("intent", "General")
-            entity    = analysis.get("entity")
-            language  = analysis.get("language", "English")
-            lang_code = analysis.get("language_code", "en")
-
-            pdf = search_documents(user_message)
-            db  = fetch_db_context(intent, entity, uid, user_city, user_lat, user_lon)
-            print(f"📊 DB:{len(db)} PDF:{len(pdf)} City:{user_city} User:{user_profile.get('name','')}")
-
-            prompt = build_prompt(user_message, language, lang_code, pdf, db, user_profile)
-
-            # ✅ جرّب 2.5-flash أولاً، وإذا 503 انتقل لـ 1.5-flash تلقائياً
-            for attempt in range(3):
-                model_to_use = CHAT_MODEL if attempt < 2 else FALLBACK_MODEL
-                try:
-                    for chunk in client.models.generate_content_stream(
-                        model=model_to_use,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            system_instruction=SYSTEM_PROMPT,
-                            temperature=0.7,
-                            max_output_tokens=800,
-                            safety_settings=SAFETY,
-                        )
-                    ):
-                        try:
-                            if chunk.text:
-                                yield chunk.text
-                        except Exception:
-                            continue
-                    break  # نجح — اخرج من الـ loop
-                except Exception as e:
-                    err = str(e)
-                    if "503" in err or "UNAVAILABLE" in err:
-                        if attempt < 2:
-                            time.sleep(1.5)  # انتظر قليلاً ثم أعد المحاولة
-                            continue
-                        else:
-                            yield f"\n\n⚠️ الخادم مشغول حالياً، يرجى المحاولة مرة أخرى."
-                    else:
-                        yield f"\n\n❌ Error: {e}"
-                    break
-
-        except Exception as e:
-            yield f"\n\n❌ Error: {e}"
-
-    return StreamingResponse(stream(), media_type="text/plain; charset=utf-8")
+@app.get("/user/greeting")
+def get_user_greeting(user_id: int = Query(...)):
+    profile = fetch_user_profile(user_id)
+    return {"name": profile.get("name", ""), "city": profile.get("city", "")}
 
 
 @app.get("/health")
@@ -492,24 +587,29 @@ def health():
     checks = {}
     try:
         r = supabase.table("events").select("count", count="exact").execute()
-        checks["events"]   = f"✅ {r.count} records"
-    except:
-        checks["events"]   = "❌"
+        checks["events"] = f"✅ {r.count} records"
+    except Exception as e:
+        checks["events"] = f"❌ {e}"
     try:
         r = supabase.table("services").select("count", count="exact").execute()
         checks["services"] = f"✅ {r.count} records"
-    except:
-        checks["services"] = "❌"
+    except Exception as e:
+        checks["services"] = f"❌ {e}"
+    try:
+        r = supabase.table("tickets").select("count", count="exact").execute()
+        checks["tickets"] = f"✅ {r.count} records"
+    except Exception as e:
+        checks["tickets"] = f"❌ {e}"
     try:
         client.models.generate_content(
             model=CHAT_MODEL,
             contents="ping",
             config=types.GenerateContentConfig(max_output_tokens=5)
         )
-        checks["gemini"] = "✅ google.genai"
+        checks["gemini"] = "✅ google.genai v8"
     except Exception as e:
         checks["gemini"] = f"❌ {e}"
-    return {"status": "running", "version": "7.0", "checks": checks}
+    return {"status": "running", "version": "8.0", "checks": checks}
 
 
 if __name__ == "__main__":
