@@ -5,6 +5,7 @@ YAHALA Assistant v7.0 — Personalized + Location-Aware
 import json
 import math
 import os
+import time
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from supabase import create_client, Client
@@ -24,7 +25,8 @@ if not all([SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY]):
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-CHAT_MODEL      = "gemini-2.5-flash"
+CHAT_MODEL         = "gemini-2.5-flash"
+FALLBACK_MODEL     = "gemini-1.5-flash"
 EMBEDDING_MODEL = "gemini-embedding-001"
 
 SAFETY = [
@@ -447,21 +449,37 @@ def chat_stream(user_message: str = Query(...), user_id: str = Query(...),
 
             prompt = build_prompt(user_message, language, lang_code, pdf, db, user_profile)
 
-            for chunk in client.models.generate_content_stream(
-                model=CHAT_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    temperature=0.7,
-                    max_output_tokens=800,
-                    safety_settings=SAFETY,
-                )
-            ):
+            # ✅ جرّب 2.5-flash أولاً، وإذا 503 انتقل لـ 1.5-flash تلقائياً
+            for attempt in range(3):
+                model_to_use = CHAT_MODEL if attempt < 2 else FALLBACK_MODEL
                 try:
-                    if chunk.text:
-                        yield chunk.text
-                except Exception:
-                    continue
+                    for chunk in client.models.generate_content_stream(
+                        model=model_to_use,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=SYSTEM_PROMPT,
+                            temperature=0.7,
+                            max_output_tokens=800,
+                            safety_settings=SAFETY,
+                        )
+                    ):
+                        try:
+                            if chunk.text:
+                                yield chunk.text
+                        except Exception:
+                            continue
+                    break  # نجح — اخرج من الـ loop
+                except Exception as e:
+                    err = str(e)
+                    if "503" in err or "UNAVAILABLE" in err:
+                        if attempt < 2:
+                            time.sleep(1.5)  # انتظر قليلاً ثم أعد المحاولة
+                            continue
+                        else:
+                            yield f"\n\n⚠️ الخادم مشغول حالياً، يرجى المحاولة مرة أخرى."
+                    else:
+                        yield f"\n\n❌ Error: {e}"
+                    break
 
         except Exception as e:
             yield f"\n\n❌ Error: {e}"
