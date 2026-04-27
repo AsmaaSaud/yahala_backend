@@ -173,8 +173,8 @@ def fetch_user_profile(user_id: int) -> dict:
     try:
         r = supabase.table("users") \
             .select("user_id,name,city,nationality,gender,id_number,email,latitude,longitude") \
-            .eq("user_id", user_id).maybeSingle().execute()
-        return r.data or {}
+            .eq("user_id", user_id).limit(1).execute()
+        return (r.data[0] if r.data else {})
     except Exception as e:
         print(f"⚠️ Profile error: {e}")
         return {}
@@ -221,7 +221,7 @@ def fetch_db_context(
             return unique
 
         elif intent == "Hotels":
-            cols = "service_name,description,location,city,rating,price_range,contact_info,opening_hours,languages_supported,latitude,longitude"
+            cols = "service_name,location,city,rating,price_range,contact_info,opening_hours,languages_supported,latitude,longitude"
             query = supabase.table("services").select(cols).eq("service_category", "Hotel")
             if user_city:
                 query = query.ilike("city", f"%{user_city}%")
@@ -236,7 +236,7 @@ def fetch_db_context(
             return results[:3]
 
         elif intent == "Restaurants":
-            cols = "service_name,description,location,city,rating,price_range,contact_info,opening_hours,halal_certified,latitude,longitude"
+            cols = "service_name,location,city,rating,price_range,contact_info,opening_hours,halal_certified,latitude,longitude"
             query = supabase.table("services").select(cols).eq("service_category", "Restaurant")
             if user_city:
                 query = query.ilike("city", f"%{user_city}%")
@@ -251,7 +251,7 @@ def fetch_db_context(
             return results[:3]
 
         elif intent == "FanZone":
-            cols = "service_name,description,location,city,opening_hours,contact_info,tags,latitude,longitude"
+            cols = "service_name,location,city,opening_hours,contact_info,tags,latitude,longitude"
             query = supabase.table("services").select(cols).eq("service_category", "Event")
             if user_city:
                 query = query.ilike("city", f"%{user_city}%")
@@ -271,8 +271,8 @@ def fetch_db_context(
         elif intent == "UserProfile":
             r = supabase.table("users") \
                 .select("name,city,nationality,gender,birthDate") \
-                .eq("user_id", user_id).maybeSingle().execute()
-            return [r.data] if r.data else []
+                .eq("user_id", user_id).limit(1).execute()
+            return [r.data[0]] if r.data else []
 
     except Exception as e:
         print(f"⚠️ DB error: {e}")
