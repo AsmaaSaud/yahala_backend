@@ -221,14 +221,14 @@ def fetch_db_context(
             return unique
 
         elif intent == "Hotels":
-            cols = "service_name,location,city,rating,price_range,contact_info,opening_hours,languages_supported,latitude,longitude"
-            query = supabase.table("services").select(cols).eq("service_category", "Hotel")
+            cols = "service_name,city,rating,price_range,contact_info,opening_hours,languages_supported,latitude,longitude"
+            query = supabase.table("services").select(cols).ilike("service_category", "hotel")
             if user_city:
                 query = query.ilike("city", f"%{user_city}%")
             r = query.order("rating", desc=True).limit(20).execute()
             results = r.data or []
             if not results:
-                r = supabase.table("services").select(cols).eq("service_category", "Hotel") \
+                r = supabase.table("services").select(cols).ilike("service_category", "hotel") \
                     .order("rating", desc=True).limit(20).execute()
                 results = r.data or []
             if user_lat is not None and user_lon is not None and results:
@@ -236,14 +236,14 @@ def fetch_db_context(
             return results[:3]
 
         elif intent == "Restaurants":
-            cols = "service_name,location,city,rating,price_range,contact_info,opening_hours,halal_certified,latitude,longitude"
-            query = supabase.table("services").select(cols).eq("service_category", "Restaurant")
+            cols = "service_name,city,rating,price_range,contact_info,opening_hours,halal_certified,latitude,longitude"
+            query = supabase.table("services").select(cols).ilike("service_category", "restaurant")
             if user_city:
                 query = query.ilike("city", f"%{user_city}%")
             r = query.order("rating", desc=True).limit(20).execute()
             results = r.data or []
             if not results:
-                r = supabase.table("services").select(cols).eq("service_category", "Restaurant") \
+                r = supabase.table("services").select(cols).ilike("service_category", "restaurant") \
                     .order("rating", desc=True).limit(20).execute()
                 results = r.data or []
             if user_lat is not None and user_lon is not None and results:
@@ -251,14 +251,14 @@ def fetch_db_context(
             return results[:3]
 
         elif intent == "FanZone":
-            cols = "service_name,location,city,opening_hours,contact_info,tags,latitude,longitude"
-            query = supabase.table("services").select(cols).eq("service_category", "Event")
+            cols = "service_name,city,opening_hours,contact_info,tags,latitude,longitude"
+            query = supabase.table("services").select(cols).ilike("service_category", "event")
             if user_city:
                 query = query.ilike("city", f"%{user_city}%")
             r = query.order("rating", desc=True).limit(20).execute()
             results = r.data or []
             if not results:
-                r = supabase.table("services").select(cols).eq("service_category", "Event") \
+                r = supabase.table("services").select(cols).ilike("service_category", "event") \
                     .order("rating", desc=True).limit(20).execute()
                 results = r.data or []
             if user_lat is not None and user_lon is not None and results:
