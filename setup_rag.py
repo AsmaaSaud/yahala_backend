@@ -106,3 +106,4 @@ if __name__ == "__main__":
 
     print(f"\n🎉 انتهى! تم رفع {len(pdfs)} ملف")
     print("الخطوة التالية: uvicorn main_rag:app --reload --host 0.0.0.0 --port 8000")
+    
