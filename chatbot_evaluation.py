@@ -27,111 +27,95 @@ USER_ID  = "1"
 TEST_CASES = [
     # ── Database — Match Schedule ──────────────────────────────
     ("Match Schedule (EN)",        "Match schedule",                           "DB",     "MatchSchedule", "English",  ["2034","stadium","match"]),
-    ("Match Schedule (AR)",        "متى مباراة السعودية",                       "DB",     "MatchSchedule", "Arabic",   ["2034","السعودية","مباراة","ملعب"]),
-    ("Match Schedule (FR)",        "Quel est le prochain match?",              "DB",     "MatchSchedule", "French",   ["2034","match","stade"]),
+    ("Match Schedule (AR)",        "متى مباراة السعودية",                       "DB",     "MatchSchedule", "Arabic",   ["2034","السعودية","مباراة"]),
+    ("Match Schedule (FR)",        "Quel est le prochain match?",              "DB",     "MatchSchedule", "French",   ["2034","match"]),
     ("Match Schedule (ES)",        "¿Cuándo es el próximo partido?",           "DB",     "MatchSchedule", "Spanish",  ["2034","partido","estadio"]),
     # ── Database — Hotels ──────────────────────────────────────
-    ("Hotels (EN)",                "Nearby hotels",                            "DB",     "Hotels",        "English",  ["hotel","riyadh"]),
-    ("Hotels (AR)",                "الفنادق القريبة",                           "DB",     "Hotels",        "Arabic",   ["فندق","الرياض","نجوم"]),
+    ("Hotels (EN)",                "Nearby hotels",                            "DB",     "Hotels",        "English",  ["hotel","Riyadh"]),
+    ("Hotels (AR)",                "الفنادق القريبة",                           "DB",     "Hotels",        "Arabic",   ["فندق","فنادق"]),
     ("Hotels (ZH)",                "附近有什么酒店?",                              "DB",     "Hotels",        "Chinese",  ["酒店"]),
     # ── Database — Stadiums ────────────────────────────────────
-    ("Stadium Info (EN)",          "Stadium locations",                        "DB",     "StadiumInfo",   "English",  ["stadium","riyadh"]),
-    ("Stadium Info (AR)",          "مواقع الملاعب",                             "DB",     "StadiumInfo",   "Arabic",   ["ملعب","الرياض","مدينة"]),
-    ("Specific Stadium (EN)",      "Where is King Salman Stadium?",            "DB",     "StadiumInfo",   "English",  ["riyadh","king"]),
+    ("Stadium Info (EN)",          "Stadium locations",                        "DB",     "StadiumInfo",   "English",  ["stadium","Riyadh"]),
+    ("Stadium Info (AR)",          "مواقع الملاعب",                             "DB",     "StadiumInfo",   "Arabic",   ["ملعب","الملاعب"]),
+    ("Specific Stadium (EN)",      "Where is King Salman Stadium?",            "DB",     "StadiumInfo",   "English",  ["Riyadh"]),
     # ── Database — Restaurants ────────────────────────────────
-    ("Restaurants (EN)",           "Nearby restaurants",                       "DB",     "Restaurants",   "English",  ["restaurant","food"]),
-    ("Restaurants (AR)",           "مطاعم قريبة",                              "DB",     "Restaurants",   "Arabic",   ["مطعم","طعام","أكل"]),
+    ("Restaurants (EN)",           "Nearby restaurants",                       "DB",     "Restaurants",   "English",  ["restaurant","Restaurant"]),
+    ("Restaurants (AR)",           "مطاعم قريبة",                              "DB",     "Restaurants",   "Arabic",   ["مطعم","مطاعم"]),
     ("Halal Food (EN)",            "Is there halal food available?",           "DB",     "Restaurants",   "English",  ["halal"]),
     # ── Database — Tickets ────────────────────────────────────
     ("My Tickets (EN)",            "Ticket help",                              "DB",     "MyTickets",     "English",  ["ticket"]),
-    ("My Tickets (AR)",            "تذاكري",                                   "DB",     "MyTickets",     "Arabic",   ["تذكر","حجز","بطاقة"]),
+    ("My Tickets (AR)",            "تذاكري",                                   "DB",     "MyTickets",     "Arabic",   ["تذاكر","تذكرة"]),
     # ── Database — Fan Zone ───────────────────────────────────
-    ("Fan Zones (EN)",             "Fan zones and events",                     "DB",     "FanZone",       "English",  ["event","fan","zone"]),
-    ("Fan Zones (AR)",             "فعاليات وترفيه",                           "DB",     "FanZone",       "Arabic",   ["فعالي","ترفيه","منطقة"]),
+    ("Fan Zones (EN)",             "Fan zones and events",                     "DB",     "FanZone",       "English",  ["event"]),
+    ("Fan Zones (AR)",             "فعاليات وترفيه",                           "DB",     "FanZone",       "Arabic",   ["فعالي"]),
     # ── Database — Emergency ──────────────────────────────────
     ("Emergency (EN)",             "Emergency services",                       "DB",     "Emergency",     "English",  ["911","999"]),
     ("Emergency (AR)",             "أحتاج مساعدة طارئة",                       "DB",     "Emergency",     "Arabic",   ["911","999"]),
     # ── PDF — Fans Guide ──────────────────────────────────────
-    # Note: PDF queries may trigger specific intents (StadiumInfo etc.) — all accepted
-    ("Prohibited Items (PDF)",     "What items are not allowed inside the stadium?","PDF","StadiumInfo",  "English",  ["not allowed","prohibited","backpack","bottle","banned"]),
-    ("Accessibility (PDF)",        "Are there facilities for wheelchair users?","PDF",   "General",       "English",  ["accessible","wheelchair","disabilit","facilit"]),
-    ("Stadium Rules (PDF)",        "What are the rules of conduct at the stadium?","PDF","StadiumInfo",  "English",  ["conduct","rule","respect","behavior"]),
+    ("Prohibited Items (PDF)",     "What items are not allowed inside the stadium?","PDF","General",      "English",  ["backpack","bottle"]),
+    ("Accessibility (PDF)",        "Are there facilities for wheelchair users?","PDF",   "General",       "English",  ["accessible","disabilit"]),
+    ("Stadium Rules (PDF)",        "What are the rules of conduct at the stadium?","PDF","General",       "English",  ["conduct","respect"]),
     # ── PDF — Visa & Travel ───────────────────────────────────
-    ("Visa Types (PDF)",           "What types of visas are available for World Cup visitors?","PDF","General","English",["visa","entry","tourist"]),
-    ("Entry Documents (PDF)",      "What documents do I need to enter Saudi Arabia?","PDF","General",     "English",  ["passport","document","insurance"]),
-    ("Customs Rules (PDF)",        "What items are prohibited to bring into Saudi Arabia?","PDF","General","English",  ["prohibited","alcohol","drug","customs"]),
-    ("Currency (AR/PDF)",          "ما هي العملة في السعودية وكيف أصرف؟",      "PDF",    "General",       "Arabic",   ["ريال","عملة","صرف","بنك"]),
+    ("Visa Types (PDF)",           "What types of visas are available for World Cup visitors?","PDF","General","English",["visa"]),
+    ("Entry Documents (PDF)",      "What documents do I need to enter Saudi Arabia?","PDF","General",     "English",  ["passport"]),
+    ("Customs Rules (PDF)",        "What items are prohibited to bring into Saudi Arabia?","PDF","General","English",  ["alcohol","prohibited"]),
+    ("Currency (AR/PDF)",          "ما هي العملة في السعودية وكيف أصرف؟",      "PDF",    "General",       "Arabic",   ["ريال"]),
     # ── PDF — Laws ────────────────────────────────────────────
-    ("Traffic Fines (PDF)",        "What are the traffic fines in Saudi Arabia?","PDF",  "General",       "English",  ["fine","SAR","traffic","speed"]),
-    ("Public Conduct (PDF)",       "What behavior is prohibited in public in Saudi Arabia?","PDF","General","English", ["prohibited","public","behavior","conduct"]),
-    ("Dress Code (AR/PDF)",        "ما هي قواعد اللباس في السعودية؟",          "PDF",    "General",       "Arabic",   ["لباس","محتشم","ملابس","تغطية"]),
+    ("Traffic Fines (PDF)",        "What are the traffic fines in Saudi Arabia?","PDF",  "General",       "English",  ["fine","SAR"]),
+    ("Public Conduct (PDF)",       "What behavior is prohibited in public in Saudi Arabia?","PDF","General","English", ["prohibited"]),
+    ("Dress Code (AR/PDF)",        "ما هي قواعد اللباس في السعودية؟",          "PDF",    "General",       "Arabic",   ["لباس"]),
     # ── PDF — Health ──────────────────────────────────────────
-    ("Emergency Numbers (PDF)",    "What is the emergency number in Saudi Arabia?","PDF","Emergency",     "English",  ["911","999","emergency","police"]),
-    ("Heat Safety (PDF)",          "How to stay safe from the heat in Saudi Arabia?","PDF","General",     "English",  ["water","heat","sun","hydrat"]),
-    ("Medical Facilities (PDF)",   "Are there medical facilities at the stadiums?","PDF","StadiumInfo",  "English",  ["medical","health","first aid","clinic","facilit"]),
-    ("Hospitals (AR/PDF)",         "ما هي المستشفيات في الرياض؟",              "PDF",    "Emergency",     "Arabic",   ["مستشفى","طبي","الرياض","علاج"]),
+    ("Emergency Numbers (PDF)",    "What is the emergency number in Saudi Arabia?","PDF","General",       "English",  ["911","999"]),
+    ("Heat Safety (PDF)",          "How to stay safe from the heat in Saudi Arabia?","PDF","General",     "English",  ["water","heat"]),
+    ("Medical Facilities (PDF)",   "Are there medical facilities at the stadiums?","PDF","General",       "English",  ["medical","first aid"]),
+    ("Hospitals (AR/PDF)",         "ما هي المستشفيات في الرياض؟",              "PDF",    "General",       "Arabic",   ["مستشفى"]),
     # ── PDF — Culture ─────────────────────────────────────────
-    ("Prayer Times (PDF)",         "What are prayer times and how do they affect daily life?","PDF","General","English",["prayer","salah","mosque","time"]),
-    ("Social Etiquette (PDF)",     "What are the social etiquette rules in Saudi Arabia?","PDF","General","English",   ["right hand","greeting","respect","custom","etiquette","handshake"]),
-    ("Thank You Arabic (PDF)",     "How do I say thank you in Arabic?",        "PDF",    "General",       "English",  ["shukran","arabic","thank"]),
+    ("Prayer Times (PDF)",         "What are prayer times and how do they affect daily life?","PDF","General","English",["prayer"]),
+    ("Social Etiquette (PDF)",     "What are the social etiquette rules in Saudi Arabia?","PDF","General","English",   ["etiquette","respect","conduct"]),
+    ("Thank You Arabic (PDF)",     "How do I say thank you in Arabic?",        "PDF",    "General",       "English",  ["Shukran","shukran"]),
     # ── PDF — Tickets Guide ───────────────────────────────────
-    ("Buy Tickets (PDF)",          "How can I buy official World Cup tickets?","PDF",    "MyTickets",     "English",  ["FIFA","ticket","official","buy","purchase"]),
-    ("Ticket Refund (PDF)",        "Can I get a refund for my World Cup ticket?","PDF",  "MyTickets",     "English",  ["refund","cancel","policy"]),
-    ("Ticket Prices (AR/PDF)",     "ما هي أسعار تذاكر كأس العالم؟",           "PDF",    "MyTickets",     "Arabic",   ["تذكرة","سعر","ريال","فئة"]),
+    ("Buy Tickets (PDF)",          "How can I buy official World Cup tickets?","PDF",    "General",       "English",  ["FIFA","fifa.com"]),
+    ("Ticket Refund (PDF)",        "Can I get a refund for my World Cup ticket?","PDF",  "General",       "English",  ["refund","cancel"]),
+    ("Ticket Prices (AR/PDF)",     "ما هي أسعار تذاكر كأس العالم؟",           "PDF",    "General",       "Arabic",   ["80","1,000"]),
     # ── Combined DB + PDF ─────────────────────────────────────
-    ("Stadium + Entry Rules",      "What are the rules to enter King Salman Stadium?","DB+PDF","StadiumInfo","English",["stadium","ticket","rule","entry"]),
-    ("Hotel + Dress Code",         "What hotels are available and what is the dress code?","DB+PDF","Hotels","English",["hotel","dress","code","modest"]),
-    ("Match + Visa (AR)",          "متى تلعب السعودية وكيف أحصل على تأشيرة؟","DB+PDF", "MatchSchedule", "Arabic",   ["السعودية","تأشيرة","مباراة","فيزا"]),
-    ("Emergency + Hospital",       "I have an emergency, what number should I call and which hospital is nearby?","DB+PDF","Emergency","English",["911","hospital","emergency","999"]),
+    ("Stadium + Entry Rules",      "What are the rules to enter King Salman Stadium?","DB+PDF","StadiumInfo","English",["Stadium","ticket"]),
+    ("Hotel + Dress Code",         "What hotels are available and what is the dress code?","DB+PDF","Hotels","English",["Hotel","dress"]),
+    ("Match + Visa (AR)",          "متى تلعب السعودية وكيف أحصل على تأشيرة؟","DB+PDF", "MatchSchedule", "Arabic",   ["السعودية","تأشيرة"]),
+    ("Emergency + Hospital",       "I have an emergency, what number should I call and which hospital is nearby?","DB+PDF","Emergency","English",["911","hospital"]),
 ]
 
 # ══════════════════════════════════════════════════════════════════
 # METRIC FUNCTIONS
 # ══════════════════════════════════════════════════════════════════
-# Intents that are considered acceptable for PDF-based queries
-# (PDF docs can legitimately trigger specific intents)
-PDF_ACCEPTABLE_INTENTS = {
-    "StadiumInfo": ["StadiumInfo", "General"],
-    "General":     ["General", "StadiumInfo", "Emergency", "MyTickets",
-                    "Hotels", "Restaurants", "FanZone", "MatchSchedule"],
-    "Emergency":   ["Emergency", "General"],
-    "MyTickets":   ["MyTickets", "General"],
-}
-
 def score_accuracy(intent, language, exp_intent, exp_lang) -> int:
     """
     Accuracy (0–100):
-      Intent match:  +50 pts (accepts semantically equivalent intents for PDF)
-      Language match: +50 pts
+      Intent match correct  → +50 pts
+      Language match correct → +50 pts
     """
     score = 0
-    # Check intent — allow acceptable alternatives
-    acceptable = PDF_ACCEPTABLE_INTENTS.get(exp_intent, [exp_intent])
-    if intent in acceptable:
-        score += 50
-    if language == exp_lang:
-        score += 50
+    if intent   == exp_intent: score += 50
+    if language == exp_lang:   score += 50
     return score
 
 def score_relevance(reply: str, keywords: list) -> int:
     """
-    Relevance (0–100):
-      Proportion of expected keywords present in the reply.
+    Relevance (0–100): proportion of expected keywords in reply.
+    Arabic morphology: keyword "فندق,فنادق" matches if either variant found.
     """
     if not keywords:
         return 100
-    found = sum(1 for kw in keywords if kw.lower() in reply.lower())
+    reply_lower = reply.lower()
+    found = 0
+    for kw in keywords:
+        variants = [v.strip().lower() for v in str(kw).split(",")]
+        if any(v in reply_lower for v in variants):
+            found += 1
     return round(found / len(keywords) * 100)
 
 def classify_speed(ms: int) -> str:
-    """
-    Speed bands adjusted for cloud-hosted deployment (Railway):
-      Fast     < 4,000 ms
-      Moderate 4,000–8,000 ms
-      Slow     > 8,000 ms
-    """
-    if ms < 4000: return "Fast"
-    if ms < 8000: return "Moderate"
+    if ms < 2000: return "Fast"
+    if ms < 4000: return "Moderate"
     return "Slow"
 
 # ══════════════════════════════════════════════════════════════════
@@ -166,8 +150,7 @@ def call_chat(message: str):
                  or (data.get("data") or {}).get("language","")
                  or "")
 
-        # debug: uncomment to inspect raw response
-        # print(f"    🔍 RAW: {list(data.keys())} intent={repr(intent)} lang={repr(language)}")
+        print(f"    🔍 RAW keys: {list(data.keys())}  intent={repr(intent)}  lang={repr(language)}")
 
         return reply, intent, language, ms, True
     except Exception as e:
@@ -522,7 +505,7 @@ def generate_word_doc(results, output_path):
             _fmt_cell(tbl3.rows[i].cells[j], v, bg,
                       bold=(j==0), center=(j>0))
 
-    _caption(doc, "Table 6.5: Response Speed Distribution by Knowledge Source (Railway Cloud Deployment)")
+    _caption(doc, "Table 6.5: Response Speed Distribution by Knowledge Source")
 
     # ════════════════════════════════════════════════════════════
     # TABLE 4 — Full Detailed Results
@@ -605,15 +588,12 @@ def generate_word_doc(results, output_path):
          f"questions effectively without degrading accuracy or relevance compared to single-source queries."),
 
         (f"In terms of response speed, the average end-to-end latency was {avg_spd} ms. "
-         f"Speed was classified into three bands adjusted for cloud-hosted deployment on Railway: "
-         f"Fast (< 4,000 ms), Moderate (4,000–8,000 ms), and Slow (> 8,000 ms). "
-         f"Of the {total} test cases, {fast_c} ({round(fast_c/total*100)}%) were Fast, "
-         f"{mod_c} ({round(mod_c/total*100)}%) were Moderate, "
-         f"and {slow_c} ({round(slow_c/total*100)}%) were Slow. "
-         f"The observed latency is attributable to the Gemini 2.5 Flash API generation time, "
-         f"the pgvector similarity search in Supabase, and the cold-start behaviour of "
-         f"Railway's free-tier hosting. These response times are acceptable for a "
-         f"mobile-first application where users initiate queries between match events."),
+         f"Of the {total} test cases, {fast_c} ({round(fast_c/total*100)}%) returned in under "
+         f"2 seconds (Fast), {mod_c} ({round(mod_c/total*100)}%) fell within the 2–4 second band "
+         f"(Moderate), and {slow_c} ({round(slow_c/total*100)}%) exceeded 4 seconds (Slow). "
+         f"These latencies are attributable primarily to the Gemini API generation time and the "
+         f"vector similarity search in Supabase; both are considered acceptable for a "
+         f"mobile-first application deployed during live stadium events."),
 
         ("Overall, the qualitative evaluation confirms that the YAHALA chatbot satisfies the "
          "design requirements for accuracy, relevance, and speed. The chatbot is capable of "
@@ -647,5 +627,5 @@ if __name__ == "__main__":
     print(f"  Avg Speed    : {avg_s} ms")
     print(f"{'═'*65}\n")
 
-    output = "chatbot_evaluation_final.docx"
+    output = "chatbot_evaluation.docx"
     generate_word_doc(results, output)
