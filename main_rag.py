@@ -1,11 +1,5 @@
 """
 YAHALA Assistant v7.2 — Improved Accuracy, Relevance & Speed
-التحسينات:
-  1. SYSTEM_PROMPT محسّن — يضمن الرد دائماً بلغة المستخدم (عربي/فرنسي/إسباني/صيني...)
-  2. DETECT_PROMPT محسّن — يعالج أسئلة PDF بـ intent صحيح (General بدل StadiumInfo)
-  3. PDF_INTENT_MAP — يصحح intent تلقائياً بناءً على الكلمات المفتاحية
-  4. parallel execution — يشغّل DB + PDF في نفس الوقت لتقليل الوقت
-  5. language_rule محسّنة — تُضاف في system_instruction وليس فقط في prompt
 """
 
 import json
@@ -28,7 +22,7 @@ SUPABASE_KEY   = os.getenv("SUPABASE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not all([SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY]):
-    raise RuntimeError("❌ تحقق من ملف .env")
+    raise RuntimeError("❌ Missing environment variables. Check your .env file.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -44,13 +38,13 @@ SAFETY = [
     types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
 ]
 
+# temperature=0.0 stabilizes intent detection; max_output_tokens=300 is sufficient for JSON and faster
 INTENT_CONFIG = types.GenerateContentConfig(
-    temperature=0.0,   # ✅ تغيير: 0.1 → 0.0 لتثبيت نتائج intent detection
-    max_output_tokens=300,  # ✅ تغيير: 1000 → 300 (كافي للـ JSON وأسرع)
+    temperature=0.0,
+    max_output_tokens=300,
     safety_settings=SAFETY,
 )
 
-# ✅ تحسين 1: SYSTEM_PROMPT — اللغة في أعلى التعليمات وبشكل أقوى
 SYSTEM_PROMPT = """You are 'YAHALA Assistant', the official smart assistant for the YAHALA app and FIFA World Cup 2034 in Saudi Arabia.
 
 ⚠️ CRITICAL LANGUAGE RULE — TOP PRIORITY:
@@ -103,7 +97,7 @@ app = FastAPI(title="YAHALA RAG API v7.2")
 
 
 # ════════════════════════════════════════════
-# 0. Haversine
+# 0. Haversine distance calculation
 # ════════════════════════════════════════════
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
@@ -132,9 +126,6 @@ def sort_by_distance(items: list, user_lat: float, user_lon: float, limit: int =
     return enriched[:limit]
 
 
-# ════════════════════════════════════════════
-# ✅ تحسين 2: DETECT_PROMPT أوضح وأشمل
-# ════════════════════════════════════════════
 DETECT_PROMPT = """You are an intent classifier. Return ONLY a JSON object, no markdown, no explanation.
 
 INTENT DEFINITIONS (read carefully):
@@ -185,8 +176,7 @@ Examples:
 Message: {message}"""
 
 
-# ✅ تحسين 3: خريطة تصحيح intent بناءً على كلمات مفتاحية في السؤال
-# هذه تُعالج الحالات التي يُصنّفها Gemini بشكل خاطئ
+# Keyword map to override incorrect intent classifications from the model
 PDF_INTENT_KEYWORDS = {
     "General": [
         "prohibited", "not allowed", "rules of conduct", "behavior", "behaviour",
@@ -205,9 +195,7 @@ PDF_INTENT_KEYWORDS = {
 }
 
 def correct_intent(message: str, detected_intent: str) -> str:
-    """
-    ✅ تحسين: يصحح intent إذا كانت الكلمات المفتاحية تدل على General
-    """
+    """Overrides detected intent if message keywords strongly indicate a different intent."""
     msg_lower = message.lower()
     for target_intent, keywords in PDF_INTENT_KEYWORDS.items():
         if any(kw in msg_lower for kw in keywords):
@@ -226,7 +214,7 @@ def analyze_message(message: str) -> dict:
         text = r.text.strip().strip("```json").strip("```").strip()
         result = json.loads(text)
 
-        # ✅ تصحيح intent تلقائياً
+        # Apply keyword-based intent correction
         result["intent"] = correct_intent(message, result.get("intent", "General"))
         return result
     except Exception as e:
@@ -235,7 +223,7 @@ def analyze_message(message: str) -> dict:
 
 
 # ════════════════════════════════════════════
-# 2. جلب بيانات المستخدم
+# 2. Fetch user profile
 # ════════════════════════════════════════════
 def fetch_user_profile(user_id: int) -> dict:
     try:
@@ -249,7 +237,7 @@ def fetch_user_profile(user_id: int) -> dict:
 
 
 # ════════════════════════════════════════════
-# 3. جلب البيانات من الداتابيس
+# 3. Fetch data from database
 # ════════════════════════════════════════════
 def fetch_db_context(
     intent: str,
@@ -348,7 +336,7 @@ def fetch_db_context(
 
 
 # ════════════════════════════════════════════
-# 4. RAG — بحث في PDF
+# 4. RAG — vector search in PDF documents
 # ════════════════════════════════════════════
 def search_documents(query: str, top_k: int = 4) -> list[dict]:
     try:
@@ -370,7 +358,7 @@ def search_documents(query: str, top_k: int = 4) -> list[dict]:
 
 
 # ════════════════════════════════════════════
-# ✅ تحسين 4: تشغيل DB + PDF بالتوازي
+# 5. Run DB and PDF fetches in parallel to reduce latency
 # ════════════════════════════════════════════
 def fetch_db_and_pdf_parallel(
     intent: str,
@@ -381,10 +369,7 @@ def fetch_db_and_pdf_parallel(
     user_lon: float | None,
     user_message: str,
 ) -> tuple[list, list]:
-    """
-    يشغّل fetch_db_context و search_documents في نفس الوقت بدلاً من تسلسلي.
-    يوفر ~2-3 ثانية في المتوسط.
-    """
+    """Runs fetch_db_context and search_documents concurrently, saving ~2-3 seconds on average."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         db_future  = executor.submit(
             fetch_db_context, intent, entity, user_id, user_city, user_lat, user_lon
@@ -396,7 +381,7 @@ def fetch_db_and_pdf_parallel(
 
 
 # ════════════════════════════════════════════
-# 5. بناء الـ Prompt
+# 6. Build the final prompt
 # ════════════════════════════════════════════
 def build_prompt(
     message: str,
@@ -407,7 +392,6 @@ def build_prompt(
     user_profile: dict,
     intent: str = "General",
 ) -> str:
-    # ✅ تحسين 5: قاعدة اللغة تتضمن جميع اللغات المدعومة وأكثر إلحاحاً
     lang_rule = (
         f"🚨 MANDATORY LANGUAGE: Respond in {language} ONLY. "
         f"Language code: {language_code}. "
@@ -467,7 +451,7 @@ def build_prompt(
 
 
 # ════════════════════════════════════════════
-# 6. Endpoint: الترحيب
+# 7. Greeting endpoint
 # ════════════════════════════════════════════
 @app.get("/user/greeting")
 def get_user_greeting(user_id: int = Query(...)):
@@ -479,7 +463,7 @@ def get_user_greeting(user_id: int = Query(...)):
 
 
 # ════════════════════════════════════════════
-# 7. Endpoints الرئيسية
+# 8. Main endpoints
 # ════════════════════════════════════════════
 @app.get("/")
 def root():
@@ -508,13 +492,13 @@ def chat(
         language = analysis.get("language", "English")
         lang_code= analysis.get("language_code", "en")
 
-        # ✅ تشغيل DB + PDF بالتوازي
+        # Run DB and PDF fetches in parallel
         db, pdf = fetch_db_and_pdf_parallel(intent, entity, uid, user_city, lat, lon, user_message)
         print(f"📊 intent={intent} DB={len(db)} PDF={len(pdf)} lat={lat} lon={lon}")
 
         prompt = build_prompt(user_message, language, lang_code, pdf, db, user_profile, intent)
 
-        # ✅ تحسين: language_code في system_instruction أيضاً
+        # Append language code to system instruction for stricter enforcement
         system = SYSTEM_PROMPT + f"\n\nCurrent user language: {language} ({lang_code}). Respond ONLY in {language}."
 
         response = client.models.generate_content(
@@ -562,13 +546,13 @@ def chat_stream(
     language  = analysis.get("language", "English")
     lang_code = analysis.get("language_code", "en")
 
-    # ✅ تشغيل DB + PDF بالتوازي
+    # Run DB and PDF fetches in parallel
     db, pdf = fetch_db_and_pdf_parallel(intent, entity, uid, user_city, lat, lon, user_message)
     print(f"📊 intent={intent} DB={len(db)} PDF={len(pdf)} lat={lat} lon={lon} user={user_profile.get('name','')}")
 
     prompt = build_prompt(user_message, language, lang_code, pdf, db, user_profile, intent)
 
-    # ✅ system instruction مع اللغة
+    # Append language to system instruction
     system = SYSTEM_PROMPT + f"\n\nCurrent user language: {language} ({lang_code}). Respond ONLY in {language}."
 
     def stream():
@@ -598,7 +582,7 @@ def chat_stream(
                         time.sleep(1.5)
                         continue
                     else:
-                        yield "\n\n⚠️ الخادم مشغول حالياً، يرجى المحاولة مرة أخرى."
+                        yield "\n\n⚠️ Server is busy, please try again."
                 else:
                     yield f"\n\n❌ Error: {e}"
                 break
